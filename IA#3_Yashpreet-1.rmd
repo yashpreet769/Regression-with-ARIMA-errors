@@ -1,0 +1,241 @@
+---
+title: "Yashpreet_yk8742_Individual Assignment #3"
+output: html_notebook
+---
+***
+<center> 
+### Regression with ARIMA Errors Laboratory.
+#### (Total 40 pts.)
+#### Due: Dec. 2 (before midnight)
+</center>
+***
+
+As a newly minted MSBA you start working for a large resort hotel managing 1,877 rooms.  A tour operator that you freqently do business with has requested a block of 60 rooms for Aug. 22.  As this operator will pay a discounted rate for each room, your manager is uncertain if she should give this block of rooms to the tour operator, and she  has asked you to provide model-based support for this decision.
+
+Although the price is discounted and it may prevent you from selling some of these rooms at the regular price, if you reject this request, any empty rooms will not generate any reveue and you would have incurred an opportunity cost by not selling these rooms.
+
+After judicious consideration of the economic tradeoffs in the Newsvendor model, you and your manager determine that the block should be assigned to the tour operator only if the probability of your organic demand (excluding the room block in question) is smaller than 67% (i.e., you are on track to achieve a 67% service level).
+
+To address the booking question you examine the following data set and proceed to develop a demand forecast model.
+
+
+
+The data set **Booking Exercise.csv** consists of daily observations of the following six variables:
+
+* **DATE**: Calendar date corresponding to each observation.
+
+* **DOW**: Index (1-7) to indicate the day of the week each **DATE** corresponds to. This is redundant and it is eliminated below.
+
+* **DEMAND**: Number of rooms actually sold on each **DATE**.
+
+* **TUESDAY.BOOK**: Number of rooms booked on the Tuesday of the previous week for each day of the forthcoming week.  This variable is used as an input to inform the forecasts of **DEMAND** for each day of the forthcoming week.
+
+* **PICKUP.RATIO**: This is a calculated variable obtained as **PICKUP.RATIO = DEMAND/TUESDAY.BOOK** historically as **DEMAND** is observed. Because of this is a calculated relationship you can use either **PICKUP.RATIO** or **TUESDAY.BOOK** but you cannot use both variables simultaneously in a model to predict **DEMAND**. 
+
+* **DOW.INDEX**: This is a pre-calculated indicator of day-of-the-week demand intensity.  This is obtained by the Hotel using information beyond what it is contained in this data set.
+
+The code below reads the data set which includes up to the latest demand information (August 17) and prepares the data for the modeling process:
+
+```{r,warning=FALSE, message=FALSE}
+library(fpp3)
+library(tseries)
+X <- read.csv("Booking Exercise.csv") %>%
+  mutate(DATE = ymd(DATE)) %>%
+  as_tsibble(index = DATE)
+
+
+Fcst.X <- X %>% filter(DATE >= ymd("2010-08-18"))
+X <- X %>% filter(DATE <= ymd("2010-08-17"))
+```
+
+
+1. (15 pt.) Fit (a) an ETS, (b) a plain ARIMA, (c) a linear regression model to predict **DEMAND** as a function of **TUESDAY.BOOK**, (c) a non-seasonal regression model with ARIMA errors using **TUESDAY.BOOK** and **DOW.INDEX** as explanatory variables, and (d) a seasonal regression model with ARIMA errors using only **TUESDAY.BOOK** as an explanatory variable.  You may use automatic model selection to fit an initial model, but especially in cases (c) and (d) you should modify the automatically fitted models when appropriate.
+
+```{r}
+X %>% autoplot(DEMAND)
+X %>% features(DEMAND, unitroot_ndiffs)
+X %>% features(DEMAND, unitroot_nsdiffs)
+
+```
+From the plot and unit root tests above, we observe that demand is stationary and differencing is not required. So, D and d are 0.
+
+```{r}
+m <- X%>% model(ets = ETS(DEMAND), 
+                AR1 = ARIMA(DEMAND),
+                lr = TSLM(DEMAND ~ TUESDAY.BOOK),
+                AR2 = ARIMA(DEMAND ~ TUESDAY.BOOK + DOW.INDEX + PDQ(0, 0, 0)),
+                AR3 = ARIMA(DEMAND ~ TUESDAY.BOOK))
+
+
+m %>% report()
+
+```
+
+```{r}
+m %>% accuracy()
+
+```
+
+```{r}
+
+m %>% select(ets) %>% report()
+
+```
+
+
+```{r}
+m %>% select(AR1) %>% report()
+
+```
+
+
+```{r}
+
+m %>% select(lr) %>% report()
+
+```
+
+
+```{r}
+
+m %>% select(AR2) %>% report()
+
+```
+
+```{r}
+
+m %>% select(AR3) %>% report()
+
+```
+Seasonal ARIMA error (0, 0, 1)(2, 1, 0)[7] seems to have lowest AICc. We also consider linear regression model with TUESDAY.BOOK predictor  for further analysis. Now we will look at residual PACF and ACF to correct the parameters from autofiting.
+
+```{r}
+m %>% select(AR2) %>%  residuals(type="regression") %>% 
+  gg_tsdisplay(.resid, "partial", lag_max = 28)
+```
+On the basis of these graphs, we can try following non seasonal ARIMA error models:
+
+1. (0, 0, 1)
+
+2. (1, 0, 0)
+
+3. (1, 0, 1)
+
+4. (3, 0, 3)
+
+
+
+
+
+```{r}
+
+m %>% select(AR3) %>%  residuals(type="regression") %>% 
+  gg_tsdisplay(.resid, "partial", lag_max = 28)
+
+```
+The possible suggestion for linear regression with seasonal ARIMA error are -
+
+(0, 0, 1)(1, 0, 0)
+
+(2, 0, 0)(1, 0, 0)
+
+(2, 0, 1)(1, 0, 0)
+
+(0, 0, 1)(1, 1, 0)
+
+Since the auto model gives seasonal difference with 1 as the best model, we will try seasonal differencing as well.
+
+```{r}
+m <- X%>% model(ets = ETS(DEMAND), 
+                arima1 = ARIMA(DEMAND),
+                lr = TSLM(DEMAND ~ TUESDAY.BOOK),
+                AR20 = ARIMA(DEMAND ~ TUESDAY.BOOK + DOW.INDEX + pdq(0, 0, 1) + PDQ(0, 0, 0)),
+                AR21 = ARIMA(DEMAND ~ TUESDAY.BOOK + DOW.INDEX + pdq(1, 0, 0) + PDQ(0, 0, 0)),
+                AR22 = ARIMA(DEMAND ~ TUESDAY.BOOK + DOW.INDEX + pdq(1, 0, 1) + PDQ(0, 0, 0)),
+                AR23 = ARIMA(DEMAND ~ TUESDAY.BOOK + DOW.INDEX + pdq(3, 0, 3) + PDQ(0, 0, 0)),
+                AR30 = ARIMA(DEMAND ~ TUESDAY.BOOK + pdq(0, 0, 1) + PDQ(1, 0, 0)),
+                AR31 = ARIMA(DEMAND ~ TUESDAY.BOOK + pdq(2, 0, 0) + PDQ(1, 0, 0)),
+                AR32 = ARIMA(DEMAND ~ TUESDAY.BOOK + pdq(2, 0, 1) + PDQ(1, 0, 0)),
+                AR33 = ARIMA(DEMAND ~ TUESDAY.BOOK + pdq(0, 0, 1) + PDQ(1, 1, 0))
+                )
+
+m %>% report()
+```
+Since one of the model (auto linear regression with seasonal ARIMA errors) involves differencing, we need to look at the RMSE to identify which model performs better.
+
+```{r}
+m %>% accuracy()
+
+```
+d) Linear regression with Non-seasonal ARIMA errors
+
+AR22 (1, 0, 0) model gives us the best (minimum) RMSE values among all the non-seasonal models.
+
+e) Linear regression with Seasonal ARIMA errors
+
+AR32 (2, 0, 1)(1, 0, 0) model gives us the best RMSE values among all seasonal models.
+
+```{r}
+m <- X%>% model(ets = ETS(DEMAND), 
+                AR1 = ARIMA(DEMAND ~ pdq(1,0,0) + PDQ(2,0,0)),
+                lr = TSLM(DEMAND ~ TUESDAY.BOOK),
+                AR2 = ARIMA(DEMAND ~ TUESDAY.BOOK + DOW.INDEX + pdq(1,0,0) + PDQ(0, 0, 0)),
+                AR3 = ARIMA(DEMAND ~ TUESDAY.BOOK + pdq(2,0,1) + PDQ(1, 0, 0)))
+```
+
+
+```{r}
+m %>% report()
+```
+
+```{r}
+m %>% accuracy
+
+```
+
+
+2. (5 pt.) Which of the models are valid?
+
+We look at the residuals of the ARIMA errors for model validity and check whether the errors are stationary and look like white noise or not.
+```{r}
+m %>% 
+  augment() %>%
+  features(.resid, ljung_box, lag = 28)
+```
+
+All the models are valid except the plain Linear regression model since its p-value is 0.
+
+
+3. (5 pt.) Using the information criteria (AICc and BIC) what is the best model?
+
+After excluding linear regression model,  arima2 - Linear regression with TUESDAY.BOOK & DOW.INDEX variables and AR(1) error has the lowest AICc and BIC. So, it is the best model.
+
+4. (5 pt.) Use the **Fcst.X** data set created above to produce a demand forecast for the forthcoming week (i.e., Aug, 18 - 24) showing the default 80% and 90% confidence intervals.
+
+```{r}
+fcst = m %>% select(AR2) %>% forecast(new_data=Fcst.X)
+
+
+fcst %>% hilo(level=c(80, 90))  %>%
+  unpack_hilo(c('80%', '90%'))
+
+```
+```{r}
+fcst %>% autoplot(level=c(80, 90)) + geom_line(X, mapping = aes(y = DEMAND))
+```
+
+5. (10 pt.) What is your recommendation for your manager regarding the tour operator block?  Should your manager sell the block of 60 rooms at a discounted price?  Justify your answer.
+
+We will start with maintaining 67% serviceability that is based on the capacity. 
+
+```{r}
+service_level = (1877 - 60)
+service_level
+```
+We will calculate 33% confidence interval, to get 67th percentile for 22-24th August.
+
+```{r}
+fcst %>% hilo(level=c(33))  %>%
+  unpack_hilo(c("33%")) %>% select(DATE, .mean, "33%_lower", "33%_upper") %>% filter(DATE >= "2010-08-22")
+```
+The 67th percentile value is 1783, 1840 and 1912 for 22-24th August, which is more than 1817 for 23-24th August. Hence, we recommend not to book the room at a discounted rate because the natural demand is enough to cater to the available rooms.
